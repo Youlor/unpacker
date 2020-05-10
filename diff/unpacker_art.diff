@@ -1,0 +1,162 @@
+diff --git a/dex2oat/dex2oat.cc b/dex2oat/dex2oat.cc
+index 729d712a54..44aedbf8b5 100644
+--- a/dex2oat/dex2oat.cc
++++ b/dex2oat/dex2oat.cc
+@@ -1179,6 +1179,11 @@ class Dex2Oat FINAL {
+ 
+     // Insert some compiler things.
+     InsertCompileOptions(argc, argv);
++
++    //patch by Youlor
++    //++++++++++++++++++++++++++++
++    compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
++    //++++++++++++++++++++++++++++
+   }
+ 
+   // Check whether the oat output files are writable, and open them for later. Also open a swap
+diff --git a/runtime/Android.mk b/runtime/Android.mk
+index aa12c83ceb..fbf97f785a 100644
+--- a/runtime/Android.mk
++++ b/runtime/Android.mk
+@@ -193,7 +193,15 @@ LIBART_COMMON_SRC_FILES := \
+   verifier/reg_type_cache.cc \
+   verifier/register_line.cc \
+   well_known_classes.cc \
+-  zip_archive.cc
++  zip_archive.cc \
++  unpacker/unpacker.cc \
++  unpacker/cJSON.cc
++#patch by Youlor
++#++++++++++++++++++++++++++++
++  # zip_archive.cc \
++  # unpacker/unpacker.cc \
++  # unpacker/cJSON.cc
++#++++++++++++++++++++++++++++
+ 
+ LIBART_COMMON_SRC_FILES += \
+   arch/context.cc \
+diff --git a/runtime/art_method.cc b/runtime/art_method.cc
+index f86cb13512..ae71990156 100644
+--- a/runtime/art_method.cc
++++ b/runtime/art_method.cc
+@@ -40,6 +40,11 @@
+ #include "scoped_thread_state_change.h"
+ #include "well_known_classes.h"
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++#include "unpacker/unpacker.h"
++//++++++++++++++++++++++++++++
++
+ namespace art {
+ 
+ extern "C" void art_quick_invoke_stub(ArtMethod*, uint32_t*, uint32_t, Thread*, JValue*,
+@@ -255,7 +260,11 @@ void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue*
+   // If the runtime is not yet started or it is required by the debugger, then perform the
+   // Invocation by the interpreter, explicitly forcing interpretation over JIT to prevent
+   // cycling around the various JIT/Interpreter methods that handle method invocation.
+-  if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this))) {
++  //patch by Youlor
++  //++++++++++++++++++++++++++++
++  if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this) 
++      || Unpacker::shouldInterpreter(self, this))) {
++  //++++++++++++++++++++++++++++
+     if (IsStatic()) {
+       art::interpreter::EnterInterpreterFromInvoke(
+           self, this, nullptr, args, result, /*stay_in_interpreter*/ true);
+diff --git a/runtime/class_linker.h b/runtime/class_linker.h
+index 8aceffbdcc..5c1bffa503 100644
+--- a/runtime/class_linker.h
++++ b/runtime/class_linker.h
+@@ -1176,6 +1176,10 @@ class ClassLinker {
+   friend class ImageWriter;  // for GetClassRoots
+   friend class JniCompilerTest;  // for GetRuntimeQuickGenericJniStub
+   friend class JniInternalTest;  // for GetRuntimeQuickGenericJniStub
++  //patch by Youlor
++  //++++++++++++++++++++++++++++
++  friend class Unpacker;
++  //++++++++++++++++++++++++++++
+   ART_FRIEND_TEST(ClassLinkerTest, RegisterDexFileName);  // for DexLock, and RegisterDexFileLocked
+   ART_FRIEND_TEST(mirror::DexCacheTest, Open);  // for AllocDexCache
+   DISALLOW_COPY_AND_ASSIGN(ClassLinker);
+diff --git a/runtime/interpreter/interpreter.cc b/runtime/interpreter/interpreter.cc
+index 8c42b3abce..690722e99a 100644
+--- a/runtime/interpreter/interpreter.cc
++++ b/runtime/interpreter/interpreter.cc
+@@ -240,7 +240,11 @@ static std::ostream& operator<<(std::ostream& os, const InterpreterImplKind& rhs
+   return os;
+ }
+ 
+-static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
++//patch by Youlor
++//++++++++++++++++++++++++++++
++//static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
++static constexpr InterpreterImplKind kInterpreterImplKind = kSwitchImplKind;
++//++++++++++++++++++++++++++++
+ 
+ #if defined(__clang__)
+ // Clang 3.4 fails to build the goto interpreter implementation.
+diff --git a/runtime/interpreter/interpreter_switch_impl.cc b/runtime/interpreter/interpreter_switch_impl.cc
+index 18330babe0..e3032682b9 100644
+--- a/runtime/interpreter/interpreter_switch_impl.cc
++++ b/runtime/interpreter/interpreter_switch_impl.cc
+@@ -19,7 +19,10 @@
+ #include "interpreter_common.h"
+ #include "jit/jit.h"
+ #include "safe_math.h"
+-
++//patch by Youlor
++//++++++++++++++++++++++++++++
++#include "unpacker/unpacker.h"
++//++++++++++++++++++++++++++++
+ #include <memory>  // std::unique_ptr
+ 
+ namespace art {
+@@ -61,13 +64,20 @@ namespace interpreter {
+   }
+ 
+ // Code to run before each dex instruction.
++//patch by Youlor
++//++++++++++++++++++++++++++++
+ #define PREAMBLE()                                                                              \
+   do {                                                                                          \
++    bool dumped = Unpacker::dumpMethod(self, shadow_frame.GetMethod(), dex_pc);                 \
++    if (dumped) {                                                                               \
++      return JValue();                                                                          \
++    }                                                                                           \
+     if (UNLIKELY(instrumentation->HasDexPcListeners())) {                                       \
+       instrumentation->DexPcMovedEvent(self, shadow_frame.GetThisObject(code_item->ins_size_),  \
+                                        shadow_frame.GetMethod(), dex_pc);                       \
+     }                                                                                           \
+   } while (false)
++//++++++++++++++++++++++++++++
+ 
+ #define BRANCH_INSTRUMENTATION(offset)                                                         \
+   do {                                                                                         \
+diff --git a/runtime/runtime.cc b/runtime/runtime.cc
+index 6d0d6ed7fc..178eaef543 100644
+--- a/runtime/runtime.cc
++++ b/runtime/runtime.cc
+@@ -140,6 +140,11 @@
+ #include "verifier/method_verifier.h"
+ #include "well_known_classes.h"
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++#include "unpacker/unpacker.h"
++//++++++++++++++++++++++++++++
++
+ namespace art {
+ 
+ // If a signal isn't handled properly, enable a handler that attempts to dump the Java stack.
+@@ -1421,6 +1426,10 @@ void Runtime::RegisterRuntimeNativeMethods(JNIEnv* env) {
+   register_org_apache_harmony_dalvik_ddmc_DdmServer(env);
+   register_org_apache_harmony_dalvik_ddmc_DdmVmInternal(env);
+   register_sun_misc_Unsafe(env);
++  //patch by Youlor
++  //++++++++++++++++++++++++++++
++  Unpacker::register_cn_youlor_Unpacker(env);
++  //++++++++++++++++++++++++++++
+ }
+ 
+ void Runtime::DumpForSigQuit(std::ostream& os) {

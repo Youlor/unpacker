@@ -1,0 +1,15 @@
+    /* rem_float/2addr vA, vB */
+    movzx   rINSTbl, %ecx                   # ecx <- A+
+    sarl    $$4, rINST                      # rINST <- B
+    flds    VREG_ADDRESS(rINST)             # vB to fp stack
+    andb    $$0xf, %cl                      # ecx <- A
+    flds    VREG_ADDRESS(%ecx)              # vA to fp stack
+1:
+    fprem
+    fstsw   %ax
+    sahf
+    jp      1b
+    fstp    %st(1)
+    fstps   VREG_ADDRESS(%ecx)              # %st to vA
+    CLEAR_REF %ecx
+    ADVANCE_PC_FETCH_AND_GOTO_NEXT 1

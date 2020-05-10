@@ -1,0 +1,1 @@
+%include "x86/unop.S" {"instr":"negl    %eax"}

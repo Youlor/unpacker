@@ -1,0 +1,28 @@
+diff --git a/core/java/android/app/ActivityThread.java b/core/java/android/app/ActivityThread.java
+index 5cfcac33050..b452b8aacbc 100644
+--- a/core/java/android/app/ActivityThread.java
++++ b/core/java/android/app/ActivityThread.java
+@@ -149,6 +149,11 @@ import dalvik.system.VMDebug;
+ import dalvik.system.VMRuntime;
+ import org.apache.harmony.dalvik.ddmc.DdmVmInternal;
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++import cn.youlor.Unpacker;
++//++++++++++++++++++++++++++++
++
+ final class RemoteServiceException extends AndroidRuntimeException {
+     public RemoteServiceException(String msg) {
+         super(msg);
+@@ -5379,6 +5384,11 @@ public final class ActivityThread {
+             Application app = data.info.makeApplication(data.restrictedBackupMode, null);
+             mInitialApplication = app;
+ 
++            //patch by Youlor
++            //++++++++++++++++++++++++++++
++            Unpacker.unpack();
++            //++++++++++++++++++++++++++++
++
+             // don't bring up providers in restricted mode; they may depend on the
+             // app's custom Application class
+             if (!data.restrictedBackupMode) {
