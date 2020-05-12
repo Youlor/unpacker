@@ -16,7 +16,7 @@ adb pull /data/data/cn.youlor.mydemo/unpacker
 ```
 4. 调用修复工具
 ```bash
-java dexfixer.jar -f /path/to/unpacker -o /path/to/output
+java -jar dexfixer.jar /path/to/unpacker /path/to/output
 ```
 
 
@@ -29,6 +29,6 @@ java dexfixer.jar -f /path/to/unpacker -o /path/to/output
 
 
 
-### patch
+## patch
 
 查看unpacker/diff

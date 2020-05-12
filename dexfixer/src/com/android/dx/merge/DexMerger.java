@@ -32,6 +32,9 @@ import com.android.dex.SizeOf;
 import com.android.dex.TableOfContents;
 import com.android.dex.TypeList;
 import com.android.dx.command.dexer.DxContext;
+import com.android.dx.rop.code.AccessFlags;
+import com.android.dx.unpacker.MethodCodeItem;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
@@ -41,6 +44,7 @@ import java.util.*;
  */
 public final class DexMerger {
     private final Dex[] dexes;
+    private Map<Integer, MethodCodeItem> codeItems;
     private final IndexMap[] indexMaps;
 
     private final CollisionPolicy collisionPolicy;
@@ -86,6 +90,12 @@ public final class DexMerger {
 
     /** minimum number of wasted bytes before it's worthwhile to compact the result */
     private int compactWasteThreshold = 1024 * 1024; // 1MiB
+
+    public DexMerger(Dex[] dexes, CollisionPolicy collisionPolicy, DxContext context, Map<Integer, MethodCodeItem> codeItems)
+            throws IOException {
+        this(dexes, collisionPolicy, context, new WriterSizes(dexes));
+        this.codeItems = codeItems;
+    }
 
     public DexMerger(Dex[] dexes, CollisionPolicy collisionPolicy, DxContext context)
             throws IOException {
@@ -188,7 +198,7 @@ public final class DexMerger {
 
     public Dex merge() throws IOException {
         if (dexes.length == 1) {
-            return dexes[0];
+            //return dexes[0];
         } else if (dexes.length == 0) {
             return null;
         }
@@ -870,14 +880,38 @@ public final class DexMerger {
             classDataOut.writeUleb128(outMethodIndex - lastOutMethodIndex);
             lastOutMethodIndex = outMethodIndex;
 
-            classDataOut.writeUleb128(method.getAccessFlags());
+            //将method codeItem替换为dump下来的
+            if (!codeItems.containsKey(method.getMethodIndex())) {
+                classDataOut.writeUleb128(method.getAccessFlags());
 
-            if (method.getCodeOffset() == 0) {
-                classDataOut.writeUleb128(0);
-            } else {
+                if (method.getCodeOffset() == 0) {
+                    classDataOut.writeUleb128(0);
+                } else {
+                    codeOut.alignToFourBytesWithZeroFill();
+                    classDataOut.writeUleb128(codeOut.getPosition());
+                    transformCode(in, in.readCode(method), indexMap);
+                }
+            }
+            else {
+                MethodCodeItem codeItem = codeItems.get(method.getMethodIndex());
+                classDataOut.writeUleb128(method.getAccessFlags() & (~AccessFlags.ACC_NATIVE));
                 codeOut.alignToFourBytesWithZeroFill();
                 classDataOut.writeUleb128(codeOut.getPosition());
-                transformCode(in, in.readCode(method), indexMap);
+                contentsOut.codes.size++;
+                codeOut.assertFourByteAligned();
+                //+8为debugInfoOffset相对codeItem的偏移
+                int debugInfoOffsetPosition = codeOut.getPosition() + 8;
+                codeOut.write(codeItem.code);
+
+                //修正debugInfoOffset
+                int debugInfoOffset = codeItem.getCode().getDebugInfoOffset();
+                if (debugInfoOffset != 0) {
+                    int position = codeOut.getPosition();
+                    codeOut.setPosition(debugInfoOffsetPosition);
+                    codeOut.writeInt(debugInfoOut.getPosition());
+                    transformDebugInfoItem(in.open(debugInfoOffset), indexMap);
+                    codeOut.setPosition(position);
+                }
             }
         }
     }

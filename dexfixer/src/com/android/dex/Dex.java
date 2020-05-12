@@ -340,6 +340,10 @@ public final class Dex {
             return data.position();
         }
 
+        public void setPosition(int position) {
+            data.position(position);
+        }
+
         public int readInt() {
             return data.getInt();
         }
