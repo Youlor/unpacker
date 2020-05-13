@@ -60,7 +60,6 @@ class DexFixer
             if (!file.exists())
             {
                 System.out.println("Warn:" + methodCodeItemPath + " not exists!");
-                //TODO: copy file
                 Files.copy(dexFile.toPath(), new File(outputDexPath).toPath(),
                         StandardCopyOption.REPLACE_EXISTING);
                 continue;

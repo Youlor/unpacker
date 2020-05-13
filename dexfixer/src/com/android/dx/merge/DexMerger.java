@@ -211,7 +211,7 @@ public final class DexMerger {
          * result in too many bytes wasted, compact the result. To compact,
          * simply merge the result with itself.
          */
-        WriterSizes compactedSizes = new WriterSizes(this);
+        /*WriterSizes compactedSizes = new WriterSizes(this);
         int wastedByteCount = writerSizes.size() - compactedSizes.size();
         if (wastedByteCount >  + compactWasteThreshold) {
             DexMerger compacter = new DexMerger(
@@ -233,7 +233,7 @@ public final class DexMerger {
         context.out.printf("Result is %d defs/%.1fKiB. Took %.1fs%n",
                 result.getTableOfContents().classDefs.size,
                 result.getLength() / 1024f,
-                elapsed / 1000000000f);
+                elapsed / 1000000000f);*/
 
         return result;
     }
@@ -909,7 +909,13 @@ public final class DexMerger {
                     int position = codeOut.getPosition();
                     codeOut.setPosition(debugInfoOffsetPosition);
                     codeOut.writeInt(debugInfoOut.getPosition());
-                    transformDebugInfoItem(in.open(debugInfoOffset), indexMap);
+                    try {
+                        //因为DexFile的调试信息不会被ART检查, 所有可能是错误值
+                        transformDebugInfoItem(in.open(debugInfoOffset), indexMap);
+                    }
+                    catch (Exception e) {
+
+                    }
                     codeOut.setPosition(position);
                 }
             }
@@ -931,7 +937,12 @@ public final class DexMerger {
         int debugInfoOffset = code.getDebugInfoOffset();
         if (debugInfoOffset != 0) {
             codeOut.writeInt(debugInfoOut.getPosition());
-            transformDebugInfoItem(in.open(debugInfoOffset), indexMap);
+            try {
+                transformDebugInfoItem(in.open(debugInfoOffset), indexMap);
+            }
+            catch (Exception e) {
+
+            }
         } else {
             codeOut.writeInt(0);
         }
