@@ -489,29 +489,26 @@ bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc) {
 
       uint32_t index = method->GetDexMethodIndex();
       const char* name = PrettyMethod(method).c_str();
-      uint32_t flags = method->GetAccessFlags();
       const DexFile::CodeItem* code_item = method->GetCodeItem();
       uint32_t code_item_size = (uint32_t)Unpacker::getCodeItemSize(method);
 
-      uint32_t total_size = sizeof(index) + strlen(name) + 1 + sizeof(flags) + sizeof(code_item_size) + code_item_size;
-      char* buf = new char[total_size];
-      uint32_t off = 0;
-      memcpy(buf, &index, sizeof(index));
-      off += sizeof(index);
-      memcpy(buf + off, name, strlen(name) + 1);
-      off += strlen(name) + 1;
-      memcpy(buf + off, &flags, sizeof(flags));
-      off += sizeof(flags);
-      memcpy(buf + off, &code_item_size, sizeof(code_item_size));
-      off += sizeof(code_item_size);
-      memcpy(buf + off, code_item, code_item_size);
-
-      ssize_t written_size = write(fd, buf, total_size);
-      if (written_size < (ssize_t)total_size) {
-        ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, total_size, strerror(errno));
+      ssize_t written_size = write(fd, &index, 4);
+      if (written_size < 4) {
+        ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
+      }
+      written_size = write(fd, name, strlen(name) + 1);
+      if (written_size < (ssize_t)strlen(name) + 1) {
+        ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, strlen(name) + 1, strerror(errno));
+      }
+      written_size = write(fd, &code_item_size, 4);
+      if (written_size < 4) {
+        ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
+      }
+      written_size = write(fd, code_item, code_item_size);
+      if (written_size < (ssize_t)code_item_size) {
+        ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size, strerror(errno));
       }
       fsync(fd);
-      delete[] buf;
       return true;
     }
     return true;
