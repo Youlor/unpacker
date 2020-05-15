@@ -329,18 +329,17 @@ void Unpacker::invokeAllMethods() {
       auto methods = klass->GetDeclaredMethods(pointer_size);
       for (auto& m : methods) {
         ArtMethod* method = &m;
-        if (!method->IsNative() && !method->IsProxyMethod() && method->IsInvokable()) {
+        if (!method->IsProxyMethod() && method->IsInvokable() && !method->IsNative()) {
           uint32_t args_size = (uint32_t)ArtMethod::NumArgRegisters(method->GetShorty());
           if (!method->IsStatic()) {
             args_size += 1;
           }
-          uint32_t* args = new uint32_t[args_size]{};
+          std::vector<uint32_t> args(args_size, 0);
           if (!method->IsStatic()) {
             args[0] = (uint32_t)-1;
           }
           JValue result;
-          method->Invoke(self, args, args_size, &result, method->GetShorty());
-          delete[] args;
+          method->Invoke(self, args.data(), args_size, &result, method->GetShorty());
         }
       }
 
@@ -414,6 +413,7 @@ void Unpacker::unpack() {
   ULOGI("%s", "unpack begin!");
   //1. 初始化
   init();
+  // dumpAllDexes();
   //2. 解析所有类
   resolveAllTypes();
   //3. 主动调用所有方法
@@ -425,7 +425,7 @@ void Unpacker::unpack() {
   ULOGI("%s", "unpack end!");
 }
 
-bool Unpacker::shouldInterpreter(Thread *self, ArtMethod *) {
+bool Unpacker::unpackerInvoke(Thread *self, ArtMethod */*method*/) {
   if (Unpacker::dumping_method_ && self == Unpacker::self_) {
       return true;
   }
@@ -468,49 +468,100 @@ size_t Unpacker::getCodeItemSize(ArtMethod* method) {
   return size;
 }
 
+void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
+  std::string dump_path = Unpacker::getMethodDumpPath(method);
+  int fd = -1;
+  if (Unpacker::method_fds_.find(dump_path) != Unpacker::method_fds_.end()) {
+    fd = Unpacker::method_fds_[dump_path];
+  }
+  else {
+    fd = open(dump_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0777);
+    if (fd == -1) {
+      ULOGE("open %s error: %s", dump_path.c_str(), strerror(errno));
+      return;
+    }
+    Unpacker::method_fds_[dump_path] = fd;
+  }
+
+  uint32_t index = method->GetDexMethodIndex();
+  const char* name = PrettyMethod(method).c_str();
+  const DexFile::CodeItem* code_item = method->GetCodeItem();
+  uint32_t code_item_size = (uint32_t)Unpacker::getCodeItemSize(method);
+
+  ssize_t written_size = write(fd, &index, 4);
+  if (written_size < 4) {
+    ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
+  }
+  written_size = write(fd, name, strlen(name) + 1);
+  if (written_size < (ssize_t)strlen(name) + 1) {
+    ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, strlen(name) + 1, strerror(errno));
+  }
+  written_size = write(fd, &code_item_size, 4);
+  if (written_size < 4) {
+    ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
+  }
+  if (nop_size != 0) {
+    std::vector<uint8_t> nops(nop_size, 0);
+    written_size = write(fd, nops.data(), nop_size);
+    if (written_size < (ssize_t)nop_size) {
+      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, nop_size, strerror(errno));
+    }
+  }
+  written_size = write(fd, (char *)code_item + nop_size, code_item_size - nop_size);
+  if (written_size < (ssize_t)code_item_size - nop_size) {
+    ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size - nop_size, strerror(errno));
+  }
+  fsync(fd);
+}
+
 //继续解释执行返回false, dump完成返回true
-bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc) {
-  if (Unpacker::dumping_method_ && self == Unpacker::self_) {
-    //目前仅仅在第一条指令执行前进行dump
-    if (dex_pc == 0) {
-      std::string dump_path = Unpacker::getMethodDumpPath(method);
-      int fd = -1;
-      if (Unpacker::method_fds_.find(dump_path) != Unpacker::method_fds_.end()) {
-        fd = Unpacker::method_fds_[dump_path];
-      }
-      else {
-        fd = open(dump_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0777);
-        if (fd == -1) {
-          ULOGE("open %s error: %s", dump_path.c_str(), strerror(errno));
-          return true;
-        }
-        Unpacker::method_fds_[dump_path] = fd;
-      }
-
-      uint32_t index = method->GetDexMethodIndex();
-      const char* name = PrettyMethod(method).c_str();
-      const DexFile::CodeItem* code_item = method->GetCodeItem();
-      uint32_t code_item_size = (uint32_t)Unpacker::getCodeItemSize(method);
-
-      ssize_t written_size = write(fd, &index, 4);
-      if (written_size < 4) {
-        ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
-      }
-      written_size = write(fd, name, strlen(name) + 1);
-      if (written_size < (ssize_t)strlen(name) + 1) {
-        ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, strlen(name) + 1, strerror(errno));
-      }
-      written_size = write(fd, &code_item_size, 4);
-      if (written_size < 4) {
-        ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
-      }
-      written_size = write(fd, code_item, code_item_size);
-      if (written_size < (ssize_t)code_item_size) {
-        ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size, strerror(errno));
-      }
-      fsync(fd);
+bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) {
+  if (Unpacker::unpackerInvoke(self, method)) {
+    const uint16_t* const insns = method->GetCodeItem()->insns_;
+    const Instruction* inst = Instruction::At(insns + dex_pc);
+    uint16_t inst_data = inst->Fetch16(0);
+    Instruction::Code opcode = inst->Opcode(inst_data);
+    //对于一般的方法抽取(非ijiami2020, najia), 直接在第一条指令处dump即可
+    if (inst_count == 0 /*&& opcode != Instruction::GOTO && opcode != Instruction::GOTO_16 && opcode != Instruction::GOTO_32*/) {
+      Unpacker::writeMethod(method);
       return true;
     }
+    //ijiami2020, najia的特征为: goto: goto_decrypt; nop; ... ; return; const vx, n; invoke-static xxx; goto: goto_origin;
+    else if (inst_count == 0 && opcode >= Instruction::GOTO && opcode <= Instruction::GOTO_32) {
+      return false;
+    } else if (inst_count == 1 && opcode >= Instruction::CONST_4 && opcode <= Instruction::CONST_WIDE_HIGH16) {
+      return false;
+    } else if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE)) {
+      //让这条指令真正的执行
+      ULOGD("found najia/ijiami1 %s", PrettyMethod(method).c_str());
+      return false;
+    } else if (inst_count == 3) {
+      if (opcode >= Instruction::GOTO && opcode <= Instruction::GOTO_32) {
+        //写入时将第一条GOTO用nop填充
+        const Instruction* inst_first = Instruction::At(insns);
+        Instruction::Code first_opcode = inst_first->Opcode(inst->Fetch16(0));
+        CHECK(first_opcode >= Instruction::GOTO && first_opcode <= Instruction::GOTO_32);
+        ULOGD("found najia/ijiami2 %s", PrettyMethod(method).c_str());
+        switch (opcode)
+        {
+        case Instruction::GOTO:
+          Unpacker::writeMethod(method, 2);
+          break;
+        case Instruction::GOTO_16:
+          Unpacker::writeMethod(method, 4);
+          break;
+        case Instruction::GOTO_32:
+          Unpacker::writeMethod(method, 8);
+          break;
+        default:
+          break;
+        }
+      } else {
+        Unpacker::writeMethod(method);
+      }
+      return true;
+    }
+    Unpacker::writeMethod(method);
     return true;
   }
   return false;

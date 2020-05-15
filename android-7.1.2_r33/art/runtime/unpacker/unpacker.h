@@ -4,6 +4,7 @@
 #include "jni_internal.h"
 #include "base/mutex.h"
 #include "mirror/class.h"
+#include "dex_instruction.h"
 #include <list>
 #include "cJSON.h"
 
@@ -45,6 +46,8 @@ private:
   static mirror::ClassLoader* getAppClassLoader() SHARED_REQUIRES(Locks::mutator_lock_);
   //获取method code item size
   static size_t getCodeItemSize(ArtMethod* method) SHARED_REQUIRES(Locks::mutator_lock_);
+  //写入method
+  static void writeMethod(ArtMethod* method, int nop_size = 0) SHARED_REQUIRES(Locks::mutator_lock_);
 
   //初始化
   static void init() SHARED_REQUIRES(Locks::mutator_lock_);
@@ -60,10 +63,10 @@ private:
 public:
   //脱壳!
   static void unpack();
-  //方法是否需要解释器执行: 主动调用的方法需要通过Switch型解释器执行
-  static bool shouldInterpreter(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
+  //是否为脱壳机主动调用的方法
+  static bool unpackerInvoke(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
   //dump method: 在每条指令解释执行时调用该方法来dump method codeitem
-  static bool dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc) SHARED_REQUIRES(Locks::mutator_lock_);
+  static bool dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) SHARED_REQUIRES(Locks::mutator_lock_);
   //动态注册native方法
   static void register_cn_youlor_Unpacker(JNIEnv* env);
 };

@@ -68,7 +68,8 @@ namespace interpreter {
 //++++++++++++++++++++++++++++
 #define PREAMBLE()                                                                              \
   do {                                                                                          \
-    bool dumped = Unpacker::dumpMethod(self, shadow_frame.GetMethod(), dex_pc);                 \
+    inst_count++;                                                                               \
+    bool dumped = Unpacker::dumpMethod(self, shadow_frame.GetMethod(), dex_pc, inst_count);     \
     if (dumped) {                                                                               \
       return JValue();                                                                          \
     }                                                                                           \
@@ -129,6 +130,7 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
   // to keep this live for the scope of the entire function call.
   std::unique_ptr<lambda::ClosureBuilder> lambda_closure_builder;
   size_t lambda_captured_variable_index = 0;
+  int inst_count = -1;
   do {
     dex_pc = inst->GetDexPc(insns);
     shadow_frame.SetDexPC(dex_pc);
