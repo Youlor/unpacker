@@ -262,9 +262,9 @@ void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue*
   // cycling around the various JIT/Interpreter methods that handle method invocation.
   //patch by Youlor
   //++++++++++++++++++++++++++++
-  //如果是主动调用并且不是native方法则强制走解释器
+  //如果是主动调用fake invoke并且不是native方法则强制走解释器
   if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this) 
-      || (Unpacker::unpackerInvoke(self, this) && !this->IsNative()))) {
+      || (Unpacker::isFakeInvoke(self, this) && !this->IsNative()))) {
   //++++++++++++++++++++++++++++
     if (IsStatic()) {
       art::interpreter::EnterInterpreterFromInvoke(
@@ -278,8 +278,10 @@ void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue*
   } else {
     //patch by Youlor
     //++++++++++++++++++++++++++++
-    //如果是主动调用并且是native方法则不执行
-    if (Unpacker::unpackerInvoke(self, this) && this->IsNative()) {
+    //如果是主动调用fake invoke并且是native方法则不执行
+    if (Unpacker::isFakeInvoke(self, this) && this->IsNative()) {
+      // Pop transition.
+      self->PopManagedStackFragment(fragment);
       return;
     }
     //++++++++++++++++++++++++++++

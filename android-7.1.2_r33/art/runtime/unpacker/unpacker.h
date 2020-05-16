@@ -15,7 +15,6 @@ class Thread;
 
 class Unpacker {
 private:
-  static bool dumping_method_;
   static Thread* self_;
   static std::string dump_dir_;
   static std::string dex_dir_;
@@ -26,6 +25,8 @@ private:
   static std::list<const DexFile*> dex_files_;
   static mirror::ClassLoader* class_loader_;
   static std::map<std::string, int> method_fds_;
+  static bool fake_invoke_;
+  static bool real_invoke_;
 
   //获取dump目录
   static std::string getDumpDir();
@@ -63,8 +64,14 @@ private:
 public:
   //脱壳!
   static void unpack();
-  //是否为脱壳机主动调用的方法
-  static bool unpackerInvoke(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
+  //主动调用 fake invoke
+  static void enableFakeInvoke();
+  static void disableFakeInvoke();
+  static bool isFakeInvoke(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
+  //真正调用 real invoke
+  static void enableRealInvoke();
+  static void disableRealInvoke();
+  static bool isRealInvoke(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
   //dump method: 在每条指令解释执行时调用该方法来dump method codeitem
   static bool dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) SHARED_REQUIRES(Locks::mutator_lock_);
   //动态注册native方法

@@ -130,12 +130,20 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
   // to keep this live for the scope of the entire function call.
   std::unique_ptr<lambda::ClosureBuilder> lambda_closure_builder;
   size_t lambda_captured_variable_index = 0;
+  //patch by Youlor
+  //++++++++++++++++++++++++++++
   int inst_count = -1;
+  //++++++++++++++++++++++++++++
+  Instruction::Code opcode;
   do {
     dex_pc = inst->GetDexPc(insns);
     shadow_frame.SetDexPC(dex_pc);
     TraceExecution(shadow_frame, inst, dex_pc);
     inst_data = inst->Fetch16(0);
+    //patch by Youlor
+    //++++++++++++++++++++++++++++
+    opcode = inst->Opcode(inst_data);
+    //++++++++++++++++++++++++++++
     switch (inst->Opcode(inst_data)) {
       case Instruction::NOP:
         PREAMBLE();
@@ -2445,6 +2453,14 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
       case Instruction::UNUSED_7A:
         UnexpectedOpcode(inst, shadow_frame);
     }
+    //patch by Youlor
+    //++++++++++++++++++++++++++++
+    if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE) 
+        && Unpacker::isRealInvoke(self, method)) {
+      Unpacker::enableFakeInvoke();
+      Unpacker::disableRealInvoke();
+    }
+    //++++++++++++++++++++++++++++
   } while (!interpret_one_instruction);
   // Record where we stopped.
   shadow_frame.SetDexPC(inst->GetDexPc(insns));

@@ -36,7 +36,7 @@ index aa12c83ceb..fbf97f785a 100644
  LIBART_COMMON_SRC_FILES += \
    arch/context.cc \
 diff --git a/runtime/art_method.cc b/runtime/art_method.cc
-index f86cb13512..da863f0301 100644
+index f86cb13512..7a60a9ac67 100644
 --- a/runtime/art_method.cc
 +++ b/runtime/art_method.cc
 @@ -40,6 +40,11 @@
@@ -58,21 +58,23 @@ index f86cb13512..da863f0301 100644
 -  if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this))) {
 +  //patch by Youlor
 +  //++++++++++++++++++++++++++++
-+  //如果是主动调用并且不是native方法则强制走解释器
++  //如果是主动调用fake invoke并且不是native方法则强制走解释器
 +  if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this) 
-+      || (Unpacker::unpackerInvoke(self, this) && !this->IsNative()))) {
++      || (Unpacker::isFakeInvoke(self, this) && !this->IsNative()))) {
 +  //++++++++++++++++++++++++++++
      if (IsStatic()) {
        art::interpreter::EnterInterpreterFromInvoke(
            self, this, nullptr, args, result, /*stay_in_interpreter*/ true);
-@@ -266,6 +276,13 @@ void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue*
+@@ -266,6 +276,15 @@ void ArtMethod::Invoke(Thread* self, uint32_t* args, uint32_t args_size, JValue*
            self, this, receiver, args + 1, result, /*stay_in_interpreter*/ true);
      }
    } else {
 +    //patch by Youlor
 +    //++++++++++++++++++++++++++++
-+    //如果是主动调用并且是native方法则不执行
-+    if (Unpacker::unpackerInvoke(self, this) && this->IsNative()) {
++    //如果是主动调用fake invoke并且是native方法则不执行
++    if (Unpacker::isFakeInvoke(self, this) && this->IsNative()) {
++      // Pop transition.
++      self->PopManagedStackFragment(fragment);
 +      return;
 +    }
 +    //++++++++++++++++++++++++++++
@@ -112,7 +114,7 @@ index 8c42b3abce..690722e99a 100644
  #if defined(__clang__)
  // Clang 3.4 fails to build the goto interpreter implementation.
 diff --git a/runtime/interpreter/interpreter_switch_impl.cc b/runtime/interpreter/interpreter_switch_impl.cc
-index 18330babe0..9a4fdca73d 100644
+index 18330babe0..3f5d4986be 100644
 --- a/runtime/interpreter/interpreter_switch_impl.cc
 +++ b/runtime/interpreter/interpreter_switch_impl.cc
 @@ -19,7 +19,10 @@
@@ -149,14 +151,42 @@ index 18330babe0..9a4fdca73d 100644
  
  #define BRANCH_INSTRUMENTATION(offset)                                                         \
    do {                                                                                         \
-@@ -119,6 +130,7 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
+@@ -119,11 +130,20 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
    // to keep this live for the scope of the entire function call.
    std::unique_ptr<lambda::ClosureBuilder> lambda_closure_builder;
    size_t lambda_captured_variable_index = 0;
++  //patch by Youlor
++  //++++++++++++++++++++++++++++
 +  int inst_count = -1;
++  //++++++++++++++++++++++++++++
++  Instruction::Code opcode;
    do {
      dex_pc = inst->GetDexPc(insns);
      shadow_frame.SetDexPC(dex_pc);
+     TraceExecution(shadow_frame, inst, dex_pc);
+     inst_data = inst->Fetch16(0);
++    //patch by Youlor
++    //++++++++++++++++++++++++++++
++    opcode = inst->Opcode(inst_data);
++    //++++++++++++++++++++++++++++
+     switch (inst->Opcode(inst_data)) {
+       case Instruction::NOP:
+         PREAMBLE();
+@@ -2433,6 +2453,14 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
+       case Instruction::UNUSED_7A:
+         UnexpectedOpcode(inst, shadow_frame);
+     }
++    //patch by Youlor
++    //++++++++++++++++++++++++++++
++    if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE) 
++        && Unpacker::isRealInvoke(self, method)) {
++      Unpacker::enableFakeInvoke();
++      Unpacker::disableRealInvoke();
++    }
++    //++++++++++++++++++++++++++++
+   } while (!interpret_one_instruction);
+   // Record where we stopped.
+   shadow_frame.SetDexPC(inst->GetDexPc(insns));
 diff --git a/runtime/runtime.cc b/runtime/runtime.cc
 index 6d0d6ed7fc..178eaef543 100644
 --- a/runtime/runtime.cc

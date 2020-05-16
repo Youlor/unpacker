@@ -26,7 +26,8 @@
 
 namespace art {
 
-bool Unpacker::dumping_method_ = false;
+bool Unpacker::fake_invoke_ = false;
+bool Unpacker::real_invoke_ = false;
 Thread* Unpacker::self_ = nullptr;
 std::string Unpacker::dump_dir_;
 std::string Unpacker::dex_dir_;
@@ -324,26 +325,27 @@ void Unpacker::invokeAllMethods() {
       cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Inited"));
       writeJson();
       size_t pointer_size = class_linker->GetImagePointerSize();
-      Unpacker::dumping_method_ = true;
+      Unpacker::enableFakeInvoke();
 
       auto methods = klass->GetDeclaredMethods(pointer_size);
       for (auto& m : methods) {
         ArtMethod* method = &m;
-        if (!method->IsProxyMethod() && method->IsInvokable() && !method->IsNative()) {
+        if (!method->IsProxyMethod() && method->IsInvokable()) {
           uint32_t args_size = (uint32_t)ArtMethod::NumArgRegisters(method->GetShorty());
           if (!method->IsStatic()) {
             args_size += 1;
           }
           std::vector<uint32_t> args(args_size, 0);
           if (!method->IsStatic()) {
-            args[0] = (uint32_t)-1;
+            mirror::Object* thiz = klass->AllocObject(self);
+            args[0] = StackReference<mirror::Object>::FromMirrorPtr(thiz).AsVRegValue();
           }
           JValue result;
           method->Invoke(self, args.data(), args_size, &result, method->GetShorty());
         }
       }
 
-      Unpacker::dumping_method_ = false;
+      Unpacker::disableFakeInvoke();
     }
   }
 }
@@ -372,7 +374,7 @@ void Unpacker::dumpAllDexes() {
 }
 
 void Unpacker::init() {
-  Unpacker::dumping_method_ = false;
+  Unpacker::fake_invoke_ = false;
   Unpacker::self_ = Thread::Current();
   Unpacker::dump_dir_ = getDumpDir();
   mkdir(Unpacker::dump_dir_.c_str(), 0777);
@@ -397,7 +399,8 @@ void Unpacker::init() {
 }
 
 void Unpacker::fini() {
-  Unpacker::dumping_method_ = false;
+  Unpacker::fake_invoke_ = false;
+  Unpacker::real_invoke_ = false;
   Unpacker::self_ = nullptr;
   if (Unpacker::json_fd_ != -1) {
     close(Unpacker::json_fd_);
@@ -425,8 +428,31 @@ void Unpacker::unpack() {
   ULOGI("%s", "unpack end!");
 }
 
-bool Unpacker::unpackerInvoke(Thread *self, ArtMethod */*method*/) {
-  if (Unpacker::dumping_method_ && self == Unpacker::self_) {
+void Unpacker::enableFakeInvoke() {
+  Unpacker::fake_invoke_ = true;
+}
+
+void Unpacker::disableFakeInvoke() {
+  Unpacker::fake_invoke_ = false;
+}
+
+bool Unpacker::isFakeInvoke(Thread *self, ArtMethod */*method*/) {
+  if (Unpacker::fake_invoke_ && self == Unpacker::self_) {
+      return true;
+  }
+  return false;
+}
+
+void Unpacker::enableRealInvoke() {
+  Unpacker::real_invoke_ = true;
+}
+
+void Unpacker::disableRealInvoke() {
+  Unpacker::real_invoke_ = false;
+}
+
+bool Unpacker::isRealInvoke(Thread *self, ArtMethod */*method*/) {
+  if (Unpacker::real_invoke_ && self == Unpacker::self_) {
       return true;
   }
   return false;
@@ -501,39 +527,51 @@ void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
     ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
   }
   if (nop_size != 0) {
+    size_t size = offsetof(DexFile::CodeItem, insns_);
+    written_size = write(fd, code_item, size);
+    if (written_size < (ssize_t)size) {
+      ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, size, strerror(errno));
+    }
     std::vector<uint8_t> nops(nop_size, 0);
     written_size = write(fd, nops.data(), nop_size);
     if (written_size < (ssize_t)nop_size) {
       ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, nop_size, strerror(errno));
     }
+    written_size = write(fd, (char *)code_item + size + nop_size, code_item_size - size - nop_size);
+    if (written_size < (ssize_t)(code_item_size - size - nop_size)) {
+      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size - (uint32_t)size - nop_size, strerror(errno));
+    }
+  } else {
+    written_size = write(fd, (char *)code_item, code_item_size);
+    if (written_size < (ssize_t)code_item_size) {
+      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size, strerror(errno));
+    }
   }
-  written_size = write(fd, (char *)code_item + nop_size, code_item_size - nop_size);
-  if (written_size < (ssize_t)code_item_size - nop_size) {
-    ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size - nop_size, strerror(errno));
-  }
+  
   fsync(fd);
 }
 
 //继续解释执行返回false, dump完成返回true
 bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) {
-  if (Unpacker::unpackerInvoke(self, method)) {
+  if (Unpacker::isFakeInvoke(self, method)) {
     const uint16_t* const insns = method->GetCodeItem()->insns_;
     const Instruction* inst = Instruction::At(insns + dex_pc);
     uint16_t inst_data = inst->Fetch16(0);
     Instruction::Code opcode = inst->Opcode(inst_data);
-    //对于一般的方法抽取(非ijiami2020, najia), 直接在第一条指令处dump即可
-    if (inst_count == 0 /*&& opcode != Instruction::GOTO && opcode != Instruction::GOTO_16 && opcode != Instruction::GOTO_32*/) {
+    //对于一般的方法抽取(非ijiami, najia), 直接在第一条指令处dump即可
+    if (inst_count == 0 && opcode != Instruction::GOTO && opcode != Instruction::GOTO_16 && opcode != Instruction::GOTO_32) {
       Unpacker::writeMethod(method);
       return true;
     }
-    //ijiami2020, najia的特征为: goto: goto_decrypt; nop; ... ; return; const vx, n; invoke-static xxx; goto: goto_origin;
+    //ijiami, najia的特征为: goto: goto_decrypt; nop; ... ; return; const vx, n; invoke-static xxx; goto: goto_origin;
     else if (inst_count == 0 && opcode >= Instruction::GOTO && opcode <= Instruction::GOTO_32) {
       return false;
     } else if (inst_count == 1 && opcode >= Instruction::CONST_4 && opcode <= Instruction::CONST_WIDE_HIGH16) {
       return false;
     } else if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE)) {
       //让这条指令真正的执行
-      ULOGD("found najia/ijiami1 %s", PrettyMethod(method).c_str());
+      Unpacker::disableFakeInvoke();
+      Unpacker::enableRealInvoke();
       return false;
     } else if (inst_count == 3) {
       if (opcode >= Instruction::GOTO && opcode <= Instruction::GOTO_32) {
@@ -541,8 +579,8 @@ bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int 
         const Instruction* inst_first = Instruction::At(insns);
         Instruction::Code first_opcode = inst_first->Opcode(inst->Fetch16(0));
         CHECK(first_opcode >= Instruction::GOTO && first_opcode <= Instruction::GOTO_32);
-        ULOGD("found najia/ijiami2 %s", PrettyMethod(method).c_str());
-        switch (opcode)
+        ULOGD("found najia/ijiami %s", PrettyMethod(method).c_str());
+        switch (first_opcode)
         {
         case Instruction::GOTO:
           Unpacker::writeMethod(method, 2);
