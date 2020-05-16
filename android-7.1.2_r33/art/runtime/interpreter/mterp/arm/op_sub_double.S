@@ -1,0 +1,1 @@
+%include "arm/fbinopWide.S" {"instr":"fsubd   d2, d0, d1"}
