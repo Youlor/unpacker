@@ -1,5 +1,6 @@
 package cn.youlor;
 import android.app.ActivityThread;
+import android.os.Looper;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.File;
@@ -34,8 +35,9 @@ public class Unpacker {
         if (Unpacker.unpackerThread != null) {
             return;
         }
+        
         //开启线程调用
-        Unpacker.unpackerThread = new Thread(new Runnable() {
+        Unpacker.unpackerThread = new Thread() {
             @Override public void run() {
                 while (true) {
                     try {
@@ -46,10 +48,10 @@ public class Unpacker {
                     }
                     if (shouldUnpack()) {
                         Unpacker.unpackNative();
-                    }
+                    }   
                 }
             }
-        });
+        };
         Unpacker.unpackerThread.start();
     }
 

@@ -5,6 +5,8 @@
 #include "art_method-inl.h"
 #include "thread.h"
 #include "reflection.h"
+#include "object_lock.h"
+
 #include <android/log.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -192,36 +194,21 @@ mirror::ClassLoader* Unpacker::getAppClassLoader() {
   return soa.Decode<mirror::ClassLoader*>(obj_classLoader);
 }
 
-void Unpacker::resolveAllTypes() {
-  Thread* const self = Thread::Current();
-  ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
-
-  for (const DexFile* dex_file : Unpacker::dex_files_) {
-    mirror::DexCache* dex_cache = class_linker->FindDexCache(self, *dex_file, false);
-    StackHandleScope<2> hs(self);
-    Handle<mirror::ClassLoader> h_class_loader(hs.NewHandle(Unpacker::class_loader_));
-    Handle<mirror::DexCache> h_dex_cache(hs.NewHandle(dex_cache));
-
-    for (uint32_t type_idx = 0; type_idx < dex_file->GetHeader().type_ids_size_; type_idx++) {
-      mirror::Class* klass = class_linker->ResolveType(*dex_file, type_idx, h_dex_cache, h_class_loader);
-      if (klass == nullptr) {
-        self->ClearException();
-      }
-    }
-  }
-}
-
 void Unpacker::invokeAllMethods() {
-  //dump类的四种status: 
+  //dump类的六种status: 
   //Ready: 该类准备dump
-  //Found: FindClass成功
-  //Inited: EnsureInitialized成功即dump成功
-  //Failed: FindClass/EnsureInitialized失败
+  //Resolved: ResolveClass成功
+  //ResolveClassFailed: ResolveClass失败
+  //Inited: EnsureInitialized成功
+  //EnsureInitializedFailed: EnsureInitialized失败
+  //Dumped: dump所有method成功
+
   Thread* const self = Thread::Current();
   ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
 
   for (const DexFile* dex_file : Unpacker::dex_files_) {
     uint32_t class_idx = 0;
+    bool skip_clinit = false;
     cJSON* dex = nullptr;
     cJSON* current = nullptr;
     cJSON* failures = nullptr;
@@ -236,7 +223,7 @@ void Unpacker::invokeAllMethods() {
       uint32_t class_size_num = cJSON_GetNumberValue(class_size);
       if (strcmp(location_str, dex_file->GetLocation().c_str()) == 0
         && strcmp(dump_path_str, getDexDumpPath(dex_file).c_str()) == 0
-        && class_size_num == dex_file->GetHeader().class_defs_size_) {
+        && class_size_num == dex_file->NumClassDefs()) {
         // 已经处理过的dex
         current = cJSON_GetObjectItemCaseSensitive(dex, "current");
         failures = cJSON_GetObjectItemCaseSensitive(dex, "failures");
@@ -248,16 +235,12 @@ void Unpacker::invokeAllMethods() {
         char* status_str = cJSON_GetStringValue(status);
         CHECK(strcmp(descriptor_str, dex_file->GetClassDescriptor(dex_file->GetClassDef(index_num))) == 0);
         
-        if (strcmp(status_str, "Ready") == 0) {
+        if (strcmp(status_str, "Resolved") == 0) {
+          //如果status为Resolved, 说明进程在EnsureInitialized时结束了, 很大可能是<clinit>调用时进程崩溃/退出, 则不调用<clinit>而直接dump method
+          skip_clinit = true;
           class_idx = index_num;
-        } else if (strcmp(status_str, "Found") == 0) {
-          //如果status为Found, 说明进程在EnsureInitialized时结束了, 可能是<clinit>调用时进程崩溃/退出, 跳过对该类的dump
-          cJSON *failure = cJSON_CreateObject();
-          cJSON_AddNumberToObject(failure, "index", index_num);
-          cJSON_AddStringToObject(failure, "descriptor", dex_file->GetClassDescriptor(dex_file->GetClassDef(index_num)));
-          cJSON_AddStringToObject(failure, "reason", "Maybe process exit or crash when EnsureInitialized");
-          cJSON_AddItemToArray(failures, failure);
-          class_idx = index_num + 1;
+        } else if (strcmp(status_str, "Ready") == 0) {
+          class_idx = index_num;
         } else {
           class_idx = index_num + 1;
         }
@@ -269,7 +252,7 @@ void Unpacker::invokeAllMethods() {
       dex = cJSON_CreateObject();
       cJSON_AddStringToObject(dex, "location", dex_file->GetLocation().c_str());
       cJSON_AddStringToObject(dex, "dump_path", getDexDumpPath(dex_file).c_str());
-      cJSON_AddNumberToObject(dex, "class_size", dex_file->GetHeader().class_defs_size_);
+      cJSON_AddNumberToObject(dex, "class_size", dex_file->NumClassDefs());
       current = cJSON_AddObjectToObject(dex, "current");
       cJSON_AddNumberToObject(current, "index", class_idx);
       cJSON_AddStringToObject(current, "descriptor", dex_file->GetClassDescriptor(dex_file->GetClassDef(class_idx)));
@@ -279,12 +262,15 @@ void Unpacker::invokeAllMethods() {
     }
     CHECK(current != nullptr);
 
-    StackHandleScope<1> hs(self);
+    mirror::DexCache* dex_cache = class_linker->FindDexCache(self, *dex_file, false);
+    StackHandleScope<2> hs(self);
     Handle<mirror::ClassLoader> h_class_loader(hs.NewHandle(Unpacker::class_loader_));
-    for (; class_idx < dex_file->GetHeader().class_defs_size_; class_idx++) {
+    Handle<mirror::DexCache> h_dex_cache(hs.NewHandle(dex_cache));
+    
+    for (; class_idx < dex_file->NumClassDefs(); class_idx++) {
       const char* class_descriptor = dex_file->GetClassDescriptor(dex_file->GetClassDef(class_idx));
       ULOGI("dumping class %s %u/%u in %s", class_descriptor, 
-            class_idx, dex_file->GetHeader().class_defs_size_, dex_file->GetLocation().c_str());
+            class_idx, dex_file->NumClassDefs(), dex_file->GetLocation().c_str());
 
       //Ready
       cJSON_ReplaceItemInObject(current, "index", cJSON_CreateNumber(class_idx));
@@ -292,10 +278,10 @@ void Unpacker::invokeAllMethods() {
       cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Ready"));
       writeJson();
 
-      mirror::Class* klass = class_linker->FindClass(self, class_descriptor, h_class_loader);
+      mirror::Class* klass = class_linker->ResolveType(*dex_file, dex_file->GetClassDef(class_idx).class_idx_, h_dex_cache, h_class_loader);
       if (klass == nullptr) {
-        cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Fail"));
-        std::string reason = StringPrintf("FindClass error: %s", self->GetException()->Dump().c_str());
+        cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("ResolveClassFailed"));
+        std::string reason = StringPrintf("ResolveClass error: %s", self->GetException()->Dump().c_str());
         cJSON *failure = cJSON_CreateObject();
         cJSON_AddNumberToObject(failure, "index", class_idx);
         cJSON_AddStringToObject(failure, "descriptor", dex_file->GetClassDescriptor(dex_file->GetClassDef(class_idx)));
@@ -303,31 +289,37 @@ void Unpacker::invokeAllMethods() {
         cJSON_AddItemToArray(failures, failure);
         writeJson();
         self->ClearException();
+        skip_clinit = false;
         continue;
       }
-      cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Found"));
+      cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Resolved"));
       writeJson();
       StackHandleScope<1> hs2(self);
       Handle<mirror::Class> h_class(hs2.NewHandle(klass));
-      bool suc = class_linker->EnsureInitialized(self, h_class, true, true);
-      if (!suc) {
-        cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Fail"));
-        std::string reason = StringPrintf("EnsureInitialized error: %s", self->GetException()->Dump().c_str());
-        cJSON *failure = cJSON_CreateObject();
-        cJSON_AddNumberToObject(failure, "index", class_idx);
-        cJSON_AddStringToObject(failure, "descriptor", dex_file->GetClassDescriptor(dex_file->GetClassDef(class_idx)));
-        cJSON_AddStringToObject(failure, "reason", reason.c_str());
-        cJSON_AddItemToArray(failures, failure);
+      if (!skip_clinit) {
+        bool suc = class_linker->EnsureInitialized(self, h_class, true, true);
+        if (!suc) {
+          cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("EnsureInitializedFailed"));
+          writeJson();
+          self->ClearException();
+          ObjectLock<mirror::Class> lock(self, h_class);
+          mirror::Class::SetStatus(h_class, mirror::Class::kStatusInitialized, self);
+        } else {
+          cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Inited"));
+          writeJson();
+        }
+      } else {
+        ObjectLock<mirror::Class> lock(self, h_class);
+        mirror::Class::SetStatus(h_class, mirror::Class::kStatusInitialized, self);
+        skip_clinit = false;
+        cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Inited"));
         writeJson();
-        self->ClearException();
-        continue;
       }
-      cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Inited"));
-      writeJson();
+      
       size_t pointer_size = class_linker->GetImagePointerSize();
-      Unpacker::enableFakeInvoke();
-
       auto methods = klass->GetDeclaredMethods(pointer_size);
+
+      Unpacker::enableFakeInvoke();
       for (auto& m : methods) {
         ArtMethod* method = &m;
         if (!method->IsProxyMethod() && method->IsInvokable()) {
@@ -335,17 +327,20 @@ void Unpacker::invokeAllMethods() {
           if (!method->IsStatic()) {
             args_size += 1;
           }
+          
+          JValue result;
           std::vector<uint32_t> args(args_size, 0);
           if (!method->IsStatic()) {
             mirror::Object* thiz = klass->AllocObject(self);
-            args[0] = StackReference<mirror::Object>::FromMirrorPtr(thiz).AsVRegValue();
+            args[0] = StackReference<mirror::Object>::FromMirrorPtr(thiz).AsVRegValue();  
           }
-          JValue result;
           method->Invoke(self, args.data(), args_size, &result, method->GetShorty());
         }
       }
-
       Unpacker::disableFakeInvoke();
+
+      cJSON_ReplaceItemInObject(current, "status", cJSON_CreateString("Dumped"));
+      writeJson();
     }
   }
 }
@@ -364,7 +359,12 @@ void Unpacker::dumpAllDexes() {
       ULOGE("fopen %s error: %s", dump_path.c_str(), strerror(errno));
       continue;
     }
-    size_t written_size = fwrite(begin, 1, size, file);
+
+    std::vector<uint8_t> data(size);
+    memcpy(data.data(), "dex\n035", 8);
+    memcpy(data.data() + 8, begin + 8, size - 8);
+
+    size_t written_size = fwrite(data.data(), 1, size, file);
     if (written_size < size) {
       ULOGW("fwrite %s %zu/%zu error: %s", dump_path.c_str(), written_size, size, strerror(errno));
     }
@@ -416,14 +416,11 @@ void Unpacker::unpack() {
   ULOGI("%s", "unpack begin!");
   //1. 初始化
   init();
-  // dumpAllDexes();
-  //2. 解析所有类
-  resolveAllTypes();
+  //2. dump所有dex
+  dumpAllDexes();
   //3. 主动调用所有方法
   invokeAllMethods();
-  //4. dump所有dex
-  dumpAllDexes();
-  //5. 还原
+  //4. 还原
   fini();
   ULOGI("%s", "unpack end!");
 }
@@ -510,42 +507,28 @@ void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
   }
 
   uint32_t index = method->GetDexMethodIndex();
-  const char* name = PrettyMethod(method).c_str();
+  std::string str_name = PrettyMethod(method);
+  const char* name = str_name.c_str();
   const DexFile::CodeItem* code_item = method->GetCodeItem();
   uint32_t code_item_size = (uint32_t)Unpacker::getCodeItemSize(method);
 
-  ssize_t written_size = write(fd, &index, 4);
-  if (written_size < 4) {
-    ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
-  }
-  written_size = write(fd, name, strlen(name) + 1);
-  if (written_size < (ssize_t)strlen(name) + 1) {
-    ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, strlen(name) + 1, strerror(errno));
-  }
-  written_size = write(fd, &code_item_size, 4);
-  if (written_size < 4) {
-    ULOGW("write %s %zd/%d error: %s", dump_path.c_str(), written_size, 4, strerror(errno));
-  }
+  size_t total_size = 4 + strlen(name) + 1 + 4 + code_item_size;
+  std::vector<uint8_t> data(total_size);
+  uint8_t* buf = data.data();
+  memcpy(buf, &index, 4);
+  buf += 4;
+  memcpy(buf, name, strlen(name) + 1);
+  buf += strlen(name) + 1;
+  memcpy(buf, &code_item_size, 4);
+  buf += 4;
+  memcpy(buf, code_item, code_item_size);
   if (nop_size != 0) {
-    size_t size = offsetof(DexFile::CodeItem, insns_);
-    written_size = write(fd, code_item, size);
-    if (written_size < (ssize_t)size) {
-      ULOGW("write %s %zd/%zu error: %s", dump_path.c_str(), written_size, size, strerror(errno));
-    }
-    std::vector<uint8_t> nops(nop_size, 0);
-    written_size = write(fd, nops.data(), nop_size);
-    if (written_size < (ssize_t)nop_size) {
-      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, nop_size, strerror(errno));
-    }
-    written_size = write(fd, (char *)code_item + size + nop_size, code_item_size - size - nop_size);
-    if (written_size < (ssize_t)(code_item_size - size - nop_size)) {
-      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size - (uint32_t)size - nop_size, strerror(errno));
-    }
-  } else {
-    written_size = write(fd, (char *)code_item, code_item_size);
-    if (written_size < (ssize_t)code_item_size) {
-      ULOGW("write %s %zd/%u error: %s", dump_path.c_str(), written_size, code_item_size, strerror(errno));
-    }
+    memset(buf + offsetof(DexFile::CodeItem, insns_), 0, nop_size);
+  }
+
+  ssize_t written_size = write(fd, data.data(), total_size);
+  if (written_size > (ssize_t)total_size) {
+    ULOGW("write %s in %s %zd/%zu error: %s", PrettyMethod(method).c_str(), dump_path.c_str(), written_size, total_size, strerror(errno));
   }
   
   fsync(fd);
@@ -558,6 +541,7 @@ bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int 
     const Instruction* inst = Instruction::At(insns + dex_pc);
     uint16_t inst_data = inst->Fetch16(0);
     Instruction::Code opcode = inst->Opcode(inst_data);
+
     //对于一般的方法抽取(非ijiami, najia), 直接在第一条指令处dump即可
     if (inst_count == 0 && opcode != Instruction::GOTO && opcode != Instruction::GOTO_16 && opcode != Instruction::GOTO_32) {
       Unpacker::writeMethod(method);

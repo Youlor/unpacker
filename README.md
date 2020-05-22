@@ -9,7 +9,10 @@ cd /data/local/tmp
 echo cn.youlor.mydemo >> unpacker.config
 ```
 2. 启动apk等待脱壳
-当输出unpack end时脱壳完成, 20秒后将自动重新脱壳(已完全dump的dex将被忽略)
+  每隔10秒将自动重新脱壳(已完全dump的dex将被忽略)
+
+  当输出unpack end时脱壳完成
+
 3. pull出dump文件
 ```bash
 adb pull /data/data/cn.youlor.mydemo/unpacker
@@ -32,3 +35,17 @@ java -jar dexfixer.jar /path/to/unpacker /path/to/output
 ## patch
 
 查看unpacker/diff
+
+
+
+## 常见问题
+
+1. dump中途退出或卡死，重新启动进程，再次等待脱壳即可
+2. 当前仅支持被壳保护的dex, 不支持App动态加载的dex/jar
+
+
+
+## 原理
+
+
+

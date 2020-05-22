@@ -52,8 +52,6 @@ private:
 
   //初始化
   static void init() SHARED_REQUIRES(Locks::mutator_lock_);
-  //解析所有dexfile所有引用的类
-  static void resolveAllTypes() SHARED_REQUIRES(Locks::mutator_lock_);
   //主动调用所有方法
   static void invokeAllMethods() SHARED_REQUIRES(Locks::mutator_lock_);
   //dump dex
