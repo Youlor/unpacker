@@ -114,7 +114,7 @@ index 8c42b3abce..690722e99a 100644
  #if defined(__clang__)
  // Clang 3.4 fails to build the goto interpreter implementation.
 diff --git a/runtime/interpreter/interpreter_switch_impl.cc b/runtime/interpreter/interpreter_switch_impl.cc
-index 18330babe0..3f5d4986be 100644
+index 18330babe0..b642ca9416 100644
 --- a/runtime/interpreter/interpreter_switch_impl.cc
 +++ b/runtime/interpreter/interpreter_switch_impl.cc
 @@ -19,7 +19,10 @@
@@ -129,7 +129,7 @@ index 18330babe0..3f5d4986be 100644
  #include <memory>  // std::unique_ptr
  
  namespace art {
-@@ -61,13 +64,21 @@ namespace interpreter {
+@@ -61,13 +64,22 @@ namespace interpreter {
    }
  
  // Code to run before each dex instruction.
@@ -138,7 +138,8 @@ index 18330babe0..3f5d4986be 100644
  #define PREAMBLE()                                                                              \
    do {                                                                                          \
 +    inst_count++;                                                                               \
-+    bool dumped = Unpacker::dumpMethod(self, shadow_frame.GetMethod(), dex_pc, inst_count);     \
++    bool dumped = Unpacker::beforeInstructionExecute(self, shadow_frame.GetMethod(),            \
++                                                     dex_pc, inst_count);                       \
 +    if (dumped) {                                                                               \
 +      return JValue();                                                                          \
 +    }                                                                                           \
@@ -151,7 +152,7 @@ index 18330babe0..3f5d4986be 100644
  
  #define BRANCH_INSTRUMENTATION(offset)                                                         \
    do {                                                                                         \
-@@ -119,11 +130,20 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
+@@ -119,6 +131,10 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
    // to keep this live for the scope of the entire function call.
    std::unique_ptr<lambda::ClosureBuilder> lambda_closure_builder;
    size_t lambda_captured_variable_index = 0;
@@ -159,29 +160,18 @@ index 18330babe0..3f5d4986be 100644
 +  //++++++++++++++++++++++++++++
 +  int inst_count = -1;
 +  //++++++++++++++++++++++++++++
-+  Instruction::Code opcode;
    do {
      dex_pc = inst->GetDexPc(insns);
      shadow_frame.SetDexPC(dex_pc);
-     TraceExecution(shadow_frame, inst, dex_pc);
-     inst_data = inst->Fetch16(0);
-+    //patch by Youlor
-+    //++++++++++++++++++++++++++++
-+    opcode = inst->Opcode(inst_data);
-+    //++++++++++++++++++++++++++++
-     switch (inst->Opcode(inst_data)) {
-       case Instruction::NOP:
-         PREAMBLE();
-@@ -2433,6 +2453,14 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
+@@ -2433,6 +2449,13 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
        case Instruction::UNUSED_7A:
          UnexpectedOpcode(inst, shadow_frame);
      }
 +    //patch by Youlor
 +    //++++++++++++++++++++++++++++
-+    if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE) 
-+        && Unpacker::isRealInvoke(self, method)) {
-+      Unpacker::enableFakeInvoke();
-+      Unpacker::disableRealInvoke();
++    bool dumped = Unpacker::afterInstructionExecute(self, shadow_frame.GetMethod(), dex_pc, inst_count);
++    if (dumped) {
++      return JValue();
 +    }
 +    //++++++++++++++++++++++++++++
    } while (!interpret_one_instruction);

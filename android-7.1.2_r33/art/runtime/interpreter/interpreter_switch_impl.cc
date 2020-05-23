@@ -69,7 +69,8 @@ namespace interpreter {
 #define PREAMBLE()                                                                              \
   do {                                                                                          \
     inst_count++;                                                                               \
-    bool dumped = Unpacker::dumpMethod(self, shadow_frame.GetMethod(), dex_pc, inst_count);     \
+    bool dumped = Unpacker::beforeInstructionExecute(self, shadow_frame.GetMethod(),            \
+                                                     dex_pc, inst_count);                       \
     if (dumped) {                                                                               \
       return JValue();                                                                          \
     }                                                                                           \
@@ -134,16 +135,11 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
   //++++++++++++++++++++++++++++
   int inst_count = -1;
   //++++++++++++++++++++++++++++
-  Instruction::Code opcode;
   do {
     dex_pc = inst->GetDexPc(insns);
     shadow_frame.SetDexPC(dex_pc);
     TraceExecution(shadow_frame, inst, dex_pc);
     inst_data = inst->Fetch16(0);
-    //patch by Youlor
-    //++++++++++++++++++++++++++++
-    opcode = inst->Opcode(inst_data);
-    //++++++++++++++++++++++++++++
     switch (inst->Opcode(inst_data)) {
       case Instruction::NOP:
         PREAMBLE();
@@ -2455,10 +2451,9 @@ JValue ExecuteSwitchImpl(Thread* self, const DexFile::CodeItem* code_item,
     }
     //patch by Youlor
     //++++++++++++++++++++++++++++
-    if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE) 
-        && Unpacker::isRealInvoke(self, method)) {
-      Unpacker::enableFakeInvoke();
-      Unpacker::disableRealInvoke();
+    bool dumped = Unpacker::afterInstructionExecute(self, shadow_frame.GetMethod(), dex_pc, inst_count);
+    if (dumped) {
+      return JValue();
     }
     //++++++++++++++++++++++++++++
   } while (!interpret_one_instruction);

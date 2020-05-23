@@ -28,18 +28,18 @@
 
 namespace art {
 
-bool Unpacker::fake_invoke_ = false;
-bool Unpacker::real_invoke_ = false;
-Thread* Unpacker::self_ = nullptr;
-std::string Unpacker::dump_dir_;
-std::string Unpacker::dex_dir_;
-std::string Unpacker::method_dir_;
-std::string Unpacker::json_path_;
-int Unpacker::json_fd_ = -1;
-cJSON* Unpacker::json_ = nullptr;
-std::list<const DexFile*> Unpacker::dex_files_;
-mirror::ClassLoader* Unpacker::class_loader_ = nullptr;
-std::map<std::string, int> Unpacker::method_fds_;
+static bool Unpacker_fake_invoke_ = false;
+static bool Unpacker_real_invoke_ = false;
+static Thread* Unpacker_self_ = nullptr;
+static std::string Unpacker_dump_dir_;
+static std::string Unpacker_dex_dir_;
+static std::string Unpacker_method_dir_;
+static std::string Unpacker_json_path_;
+static int Unpacker_json_fd_ = -1;
+static cJSON* Unpacker_json_ = nullptr;
+static std::list<const DexFile*> Unpacker_dex_files_;
+static mirror::ClassLoader* Unpacker_class_loader_ = nullptr;
+static std::map<std::string, int> Unpacker_method_fds_;
 
 std::string Unpacker::getDumpDir() {
   Thread* const self = Thread::Current();
@@ -73,7 +73,7 @@ std::string Unpacker::getDexDumpPath(const DexFile* dex_file) {
       dex_location[i] = '_';
     }
   }
-  std::string dump_path = Unpacker::dex_dir_ + "/" + dex_location;
+  std::string dump_path = Unpacker_dex_dir_ + "/" + dex_location;
   dump_path += StringPrintf("_%zu.dex", size);
   return dump_path;
 }
@@ -89,7 +89,7 @@ std::string Unpacker::getMethodDumpPath(ArtMethod* method) {
       dex_location[i] = '_';
     }
   }
-  std::string dump_path = Unpacker::method_dir_ + "/" + dex_location;
+  std::string dump_path = Unpacker_method_dir_ + "/" + dex_location;
   dump_path += StringPrintf("_%zu_codeitem.bin", size);
   return dump_path;
 }
@@ -111,13 +111,13 @@ bail:
 }
 
 cJSON* Unpacker::parseJson() {
-  if (Unpacker::json_fd_ == -1) {
+  if (Unpacker_json_fd_ == -1) {
     return nullptr;
   }
 
-  lseek(Unpacker::json_fd_, 0, SEEK_SET);
+  lseek(Unpacker_json_fd_, 0, SEEK_SET);
   struct stat json_stat = {};
-  if (fstat(Unpacker::json_fd_, &json_stat)) {
+  if (fstat(Unpacker_json_fd_, &json_stat)) {
     ULOGE("fstat error: %s", strerror(errno));
     return nullptr;
   }
@@ -127,9 +127,9 @@ cJSON* Unpacker::parseJson() {
   }
 
   char* buf = new char[size];
-  ssize_t read_size = read(Unpacker::json_fd_, buf, size);
+  ssize_t read_size = read(Unpacker_json_fd_, buf, size);
   if (read_size != (ssize_t)size) {
-    ULOGW("fread %s %zd/%d error: %s", Unpacker::json_path_.c_str(), read_size, size, strerror(errno));
+    ULOGW("fread %s %zd/%d error: %s", Unpacker_json_path_.c_str(), read_size, size, strerror(errno));
   }
   cJSON *json = cJSON_Parse(buf);
   if (json == nullptr) {
@@ -143,22 +143,22 @@ cJSON* Unpacker::parseJson() {
 }
 
 void Unpacker::writeJson() {
-  if (Unpacker::json_fd_ == -1) {
+  if (Unpacker_json_fd_ == -1) {
     return;
   }
-  lseek(Unpacker::json_fd_, 0, SEEK_SET);
-  int fail = ftruncate(Unpacker::json_fd_, 0);
+  lseek(Unpacker_json_fd_, 0, SEEK_SET);
+  int fail = ftruncate(Unpacker_json_fd_, 0);
   if (fail) {
-    ULOGW("ftruncate %s error: %s", Unpacker::json_path_.c_str(), strerror(errno));
+    ULOGW("ftruncate %s error: %s", Unpacker_json_path_.c_str(), strerror(errno));
   }
-  char* json_str = cJSON_Print(Unpacker::json_);
+  char* json_str = cJSON_Print(Unpacker_json_);
   CHECK(json_str != nullptr);
-  ssize_t written_size = write(Unpacker::json_fd_, json_str, strlen(json_str));
+  ssize_t written_size = write(Unpacker_json_fd_, json_str, strlen(json_str));
   if (written_size != (ssize_t)strlen(json_str)) {
-    ULOGW("fwrite %s %zd/%zu error: %s", Unpacker::json_path_.c_str(), written_size, strlen(json_str), strerror(errno));
+    ULOGW("fwrite %s %zd/%zu error: %s", Unpacker_json_path_.c_str(), written_size, strlen(json_str), strerror(errno));
   }
   free(json_str);
-  fsync(Unpacker::json_fd_);
+  fsync(Unpacker_json_fd_);
 }
 
 std::list<const DexFile*> Unpacker::getDexFiles() {
@@ -206,13 +206,13 @@ void Unpacker::invokeAllMethods() {
   Thread* const self = Thread::Current();
   ClassLinker* class_linker = Runtime::Current()->GetClassLinker();
 
-  for (const DexFile* dex_file : Unpacker::dex_files_) {
+  for (const DexFile* dex_file : Unpacker_dex_files_) {
     uint32_t class_idx = 0;
     bool skip_clinit = false;
     cJSON* dex = nullptr;
     cJSON* current = nullptr;
     cJSON* failures = nullptr;
-    cJSON* dexes = cJSON_GetObjectItemCaseSensitive(Unpacker::json_, "dexes");
+    cJSON* dexes = cJSON_GetObjectItemCaseSensitive(Unpacker_json_, "dexes");
     CHECK(dexes != nullptr);
     cJSON_ArrayForEach(dex, dexes) {
       cJSON *location = cJSON_GetObjectItemCaseSensitive(dex, "location");
@@ -264,7 +264,7 @@ void Unpacker::invokeAllMethods() {
 
     mirror::DexCache* dex_cache = class_linker->FindDexCache(self, *dex_file, false);
     StackHandleScope<2> hs(self);
-    Handle<mirror::ClassLoader> h_class_loader(hs.NewHandle(Unpacker::class_loader_));
+    Handle<mirror::ClassLoader> h_class_loader(hs.NewHandle(Unpacker_class_loader_));
     Handle<mirror::DexCache> h_dex_cache(hs.NewHandle(dex_cache));
     
     for (; class_idx < dex_file->NumClassDefs(); class_idx++) {
@@ -346,7 +346,7 @@ void Unpacker::invokeAllMethods() {
 }
 
 void Unpacker::dumpAllDexes() {
-  for (const DexFile* dex_file : Unpacker::dex_files_) {
+  for (const DexFile* dex_file : Unpacker_dex_files_) {
     std::string dump_path = getDexDumpPath(dex_file);
     if (access(dump_path.c_str(), F_OK) != -1) {
       ULOGI("%s already dumped, ignored", dump_path.c_str());
@@ -374,41 +374,41 @@ void Unpacker::dumpAllDexes() {
 }
 
 void Unpacker::init() {
-  Unpacker::fake_invoke_ = false;
-  Unpacker::self_ = Thread::Current();
-  Unpacker::dump_dir_ = getDumpDir();
-  mkdir(Unpacker::dump_dir_.c_str(), 0777);
-  Unpacker::dex_dir_ = getDumpDir() + "/dex";
-  mkdir(Unpacker::dex_dir_.c_str(), 0777);
-  Unpacker::method_dir_ = getDumpDir() + "/method";
-  mkdir(Unpacker::method_dir_.c_str(), 0777);
-  Unpacker::json_path_ = getDumpDir() + "/unpacker.json";
-  Unpacker::json_fd_ = -1;
-  Unpacker::json_fd_ = open(json_path_.c_str(), O_RDWR | O_CREAT, 0777);
-  if (Unpacker::json_fd_ == -1) {
-    ULOGE("open %s error: %s", json_path_.c_str(), strerror(errno));
+  Unpacker_fake_invoke_ = false;
+  Unpacker_self_ = Thread::Current();
+  Unpacker_dump_dir_ = getDumpDir();
+  mkdir(Unpacker_dump_dir_.c_str(), 0777);
+  Unpacker_dex_dir_ = getDumpDir() + "/dex";
+  mkdir(Unpacker_dex_dir_.c_str(), 0777);
+  Unpacker_method_dir_ = getDumpDir() + "/method";
+  mkdir(Unpacker_method_dir_.c_str(), 0777);
+  Unpacker_json_path_ = getDumpDir() + "/unpacker.json";
+  Unpacker_json_fd_ = -1;
+  Unpacker_json_fd_ = open(Unpacker_json_path_.c_str(), O_RDWR | O_CREAT, 0777);
+  if (Unpacker_json_fd_ == -1) {
+    ULOGE("open %s error: %s", Unpacker_json_path_.c_str(), strerror(errno));
   }
-  Unpacker::json_ = parseJson();
-  if (Unpacker::json_ == nullptr) {
-    Unpacker::json_ = createJson();
+  Unpacker_json_ = parseJson();
+  if (Unpacker_json_ == nullptr) {
+    Unpacker_json_ = createJson();
   }
-  CHECK(Unpacker::json_ != nullptr);
+  CHECK(Unpacker_json_ != nullptr);
 
-  Unpacker::dex_files_ = getDexFiles();
-  Unpacker::class_loader_ = getAppClassLoader();
+  Unpacker_dex_files_ = getDexFiles();
+  Unpacker_class_loader_ = getAppClassLoader();
 }
 
 void Unpacker::fini() {
-  Unpacker::fake_invoke_ = false;
-  Unpacker::real_invoke_ = false;
-  Unpacker::self_ = nullptr;
-  if (Unpacker::json_fd_ != -1) {
-    close(Unpacker::json_fd_);
+  Unpacker_fake_invoke_ = false;
+  Unpacker_real_invoke_ = false;
+  Unpacker_self_ = nullptr;
+  if (Unpacker_json_fd_ != -1) {
+    close(Unpacker_json_fd_);
   }
-  for(auto iter = Unpacker::method_fds_.begin(); iter != Unpacker::method_fds_.end(); iter++) {
+  for(auto iter = Unpacker_method_fds_.begin(); iter != Unpacker_method_fds_.end(); iter++) {
     close(iter->second);
   }
-  cJSON_Delete(Unpacker::json_);
+  cJSON_Delete(Unpacker_json_);
 }
 
 void Unpacker::unpack() {
@@ -426,30 +426,30 @@ void Unpacker::unpack() {
 }
 
 void Unpacker::enableFakeInvoke() {
-  Unpacker::fake_invoke_ = true;
+  Unpacker_fake_invoke_ = true;
 }
 
 void Unpacker::disableFakeInvoke() {
-  Unpacker::fake_invoke_ = false;
+  Unpacker_fake_invoke_ = false;
 }
 
 bool Unpacker::isFakeInvoke(Thread *self, ArtMethod */*method*/) {
-  if (Unpacker::fake_invoke_ && self == Unpacker::self_) {
+  if (Unpacker_fake_invoke_ && self == Unpacker_self_) {
       return true;
   }
   return false;
 }
 
 void Unpacker::enableRealInvoke() {
-  Unpacker::real_invoke_ = true;
+  Unpacker_real_invoke_ = true;
 }
 
 void Unpacker::disableRealInvoke() {
-  Unpacker::real_invoke_ = false;
+  Unpacker_real_invoke_ = false;
 }
 
 bool Unpacker::isRealInvoke(Thread *self, ArtMethod */*method*/) {
-  if (Unpacker::real_invoke_ && self == Unpacker::self_) {
+  if (Unpacker_real_invoke_ && self == Unpacker_self_) {
       return true;
   }
   return false;
@@ -491,11 +491,11 @@ size_t Unpacker::getCodeItemSize(ArtMethod* method) {
   return size;
 }
 
-void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
+void Unpacker::dumpMethod(ArtMethod *method, int nop_size) {
   std::string dump_path = Unpacker::getMethodDumpPath(method);
   int fd = -1;
-  if (Unpacker::method_fds_.find(dump_path) != Unpacker::method_fds_.end()) {
-    fd = Unpacker::method_fds_[dump_path];
+  if (Unpacker_method_fds_.find(dump_path) != Unpacker_method_fds_.end()) {
+    fd = Unpacker_method_fds_[dump_path];
   }
   else {
     fd = open(dump_path.c_str(), O_RDWR | O_CREAT | O_APPEND, 0777);
@@ -503,7 +503,7 @@ void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
       ULOGE("open %s error: %s", dump_path.c_str(), strerror(errno));
       return;
     }
-    Unpacker::method_fds_[dump_path] = fd;
+    Unpacker_method_fds_[dump_path] = fd;
   }
 
   uint32_t index = method->GetDexMethodIndex();
@@ -535,7 +535,7 @@ void Unpacker::writeMethod(ArtMethod *method, int nop_size) {
 }
 
 //继续解释执行返回false, dump完成返回true
-bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) {
+bool Unpacker::beforeInstructionExecute(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) {
   if (Unpacker::isFakeInvoke(self, method)) {
     const uint16_t* const insns = method->GetCodeItem()->insns_;
     const Instruction* inst = Instruction::At(insns + dex_pc);
@@ -544,7 +544,7 @@ bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int 
 
     //对于一般的方法抽取(非ijiami, najia), 直接在第一条指令处dump即可
     if (inst_count == 0 && opcode != Instruction::GOTO && opcode != Instruction::GOTO_16 && opcode != Instruction::GOTO_32) {
-      Unpacker::writeMethod(method);
+      Unpacker::dumpMethod(method);
       return true;
     }
     //ijiami, najia的特征为: goto: goto_decrypt; nop; ... ; return; const vx, n; invoke-static xxx; goto: goto_origin;
@@ -567,24 +567,37 @@ bool Unpacker::dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int 
         switch (first_opcode)
         {
         case Instruction::GOTO:
-          Unpacker::writeMethod(method, 2);
+          Unpacker::dumpMethod(method, 2);
           break;
         case Instruction::GOTO_16:
-          Unpacker::writeMethod(method, 4);
+          Unpacker::dumpMethod(method, 4);
           break;
         case Instruction::GOTO_32:
-          Unpacker::writeMethod(method, 8);
+          Unpacker::dumpMethod(method, 8);
           break;
         default:
           break;
         }
       } else {
-        Unpacker::writeMethod(method);
+        Unpacker::dumpMethod(method);
       }
       return true;
     }
-    Unpacker::writeMethod(method);
+    Unpacker::dumpMethod(method);
     return true;
+  }
+  return false;
+}
+
+bool Unpacker::afterInstructionExecute(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) {
+  const uint16_t* const insns = method->GetCodeItem()->insns_;
+  const Instruction* inst = Instruction::At(insns + dex_pc);
+  uint16_t inst_data = inst->Fetch16(0);
+  Instruction::Code opcode = inst->Opcode(inst_data);
+  if (inst_count == 2 && (opcode == Instruction::INVOKE_STATIC || opcode == Instruction::INVOKE_STATIC_RANGE) 
+      && Unpacker::isRealInvoke(self, method)) {
+    Unpacker::enableFakeInvoke();
+    Unpacker::disableRealInvoke();
   }
   return false;
 }
