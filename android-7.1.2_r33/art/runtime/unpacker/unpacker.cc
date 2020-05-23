@@ -158,7 +158,6 @@ void Unpacker::writeJson() {
     ULOGW("fwrite %s %zd/%zu error: %s", Unpacker_json_path_.c_str(), written_size, strlen(json_str), strerror(errno));
   }
   free(json_str);
-  fsync(Unpacker_json_fd_);
 }
 
 std::list<const DexFile*> Unpacker::getDexFiles() {
@@ -354,9 +353,9 @@ void Unpacker::dumpAllDexes() {
     }
     const uint8_t* begin = dex_file->Begin();
     size_t size = dex_file->Size();
-    FILE* file = fopen(dump_path.c_str(), "wb");
-    if (file == nullptr) {
-      ULOGE("fopen %s error: %s", dump_path.c_str(), strerror(errno));
+    int fd = open(dump_path.c_str(), O_RDWR | O_CREAT, 0777);
+    if (fd == -1) {
+      ULOGE("open %s error: %s", dump_path.c_str(), strerror(errno));
       continue;
     }
 
@@ -364,11 +363,11 @@ void Unpacker::dumpAllDexes() {
     memcpy(data.data(), "dex\n035", 8);
     memcpy(data.data() + 8, begin + 8, size - 8);
 
-    size_t written_size = fwrite(data.data(), 1, size, file);
+    size_t written_size = write(fd, data.data(), size);
     if (written_size < size) {
       ULOGW("fwrite %s %zu/%zu error: %s", dump_path.c_str(), written_size, size, strerror(errno));
     }
-    fclose(file);
+    close(fd);
     ULOGI("dump dex %s to %s successful!", dex_file->GetLocation().c_str(), dump_path.c_str());
   }
 }
@@ -530,8 +529,6 @@ void Unpacker::dumpMethod(ArtMethod *method, int nop_size) {
   if (written_size > (ssize_t)total_size) {
     ULOGW("write %s in %s %zd/%zu error: %s", PrettyMethod(method).c_str(), dump_path.c_str(), written_size, total_size, strerror(errno));
   }
-  
-  fsync(fd);
 }
 
 //继续解释执行返回false, dump完成返回true
