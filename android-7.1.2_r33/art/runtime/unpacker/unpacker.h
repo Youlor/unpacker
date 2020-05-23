@@ -8,26 +8,15 @@
 #include <list>
 #include "cJSON.h"
 
-namespace art{
+#define HIDDEN __attribute__ ((visibility("hidden")))
+
+namespace art {
 
 class ArtMethod;
 class Thread;
 
-class Unpacker {
+class HIDDEN Unpacker {
 private:
-  static Thread* self_;
-  static std::string dump_dir_;
-  static std::string dex_dir_;
-  static std::string method_dir_;
-  static std::string json_path_;
-  static int json_fd_;
-  static cJSON* json_;
-  static std::list<const DexFile*> dex_files_;
-  static mirror::ClassLoader* class_loader_;
-  static std::map<std::string, int> method_fds_;
-  static bool fake_invoke_;
-  static bool real_invoke_;
-
   //获取dump目录
   static std::string getDumpDir();
   //获取dex dump路径
@@ -48,12 +37,10 @@ private:
   //获取method code item size
   static size_t getCodeItemSize(ArtMethod* method) SHARED_REQUIRES(Locks::mutator_lock_);
   //写入method
-  static void writeMethod(ArtMethod* method, int nop_size = 0) SHARED_REQUIRES(Locks::mutator_lock_);
+  static void dumpMethod(ArtMethod* method, int nop_size = 0) SHARED_REQUIRES(Locks::mutator_lock_);
 
   //初始化
   static void init() SHARED_REQUIRES(Locks::mutator_lock_);
-  //解析所有dexfile所有引用的类
-  static void resolveAllTypes() SHARED_REQUIRES(Locks::mutator_lock_);
   //主动调用所有方法
   static void invokeAllMethods() SHARED_REQUIRES(Locks::mutator_lock_);
   //dump dex
@@ -72,8 +59,9 @@ public:
   static void enableRealInvoke();
   static void disableRealInvoke();
   static bool isRealInvoke(Thread *self, ArtMethod *method) SHARED_REQUIRES(Locks::mutator_lock_);
-  //dump method: 在每条指令解释执行时调用该方法来dump method codeitem
-  static bool dumpMethod(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) SHARED_REQUIRES(Locks::mutator_lock_);
+  //在每条指令解释执行前会调用该方法
+  static bool beforeInstructionExecute(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) SHARED_REQUIRES(Locks::mutator_lock_);
+  static bool afterInstructionExecute(Thread *self, ArtMethod *method, uint32_t dex_pc, int inst_count) SHARED_REQUIRES(Locks::mutator_lock_);
   //动态注册native方法
   static void register_cn_youlor_Unpacker(JNIEnv* env);
 };
