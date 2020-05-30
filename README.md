@@ -152,19 +152,19 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
 
 
 
-## 刷机
-
-1. 仅支持pixel 1代
-2. 重启至bootloader: `adb reboot bootloader`
-3. 解压 Youpk_sailfish.zip 并双击 `flash-all.bat`
-
-
-
 ### 参考链接
 
 FUPK3: https://bbs.pediy.com/thread-246117.htm
 
 FART: https://bbs.pediy.com/thread-252630.htm
+
+
+
+## 刷机
+
+1. 仅支持pixel 1代
+2. 重启至bootloader: `adb reboot bootloader`
+3. 解压 Youpk_sailfish.zip 并双击 `flash-all.bat`
 
 
 
