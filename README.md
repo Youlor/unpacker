@@ -152,6 +152,14 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
 
 
 
+### 参考链接
+
+FUPK3: https://bbs.pediy.com/thread-246117.htm
+
+FART: https://bbs.pediy.com/thread-252630.htm
+
+
+
 ## 编译
 
 ### 脱壳机源码编译
