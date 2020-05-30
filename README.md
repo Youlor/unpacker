@@ -126,7 +126,7 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
          return JValue();                                                               \
        }                                                                                \
        if (UNLIKELY(instrumentation->HasDexPcListeners())) {                            \
-         instrumentation->DexPcMovedEvent(self, shadow_frame.GetThisObject(code_item->ins_size_),  shadow_frame.GetMethod(), dex_pc);            						   \
+         instrumentation->DexPcMovedEvent(self, shadow_frame.GetThisObject(code_item->ins_size_),  shadow_frame.GetMethod(), dex_pc);            						   										   \
        }                                                                                \
      } while (false)
    ```
@@ -149,6 +149,14 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
 ### 合并 DEX, CodeItem
 
 将dump下来的CodeItem填充到DEX的相应位置中即可. 主要是基于google dx工具修改.
+
+
+
+## 刷机
+
+1. 仅支持pixel 1代
+2. 重启至bootloader: `adb reboot bootloader`
+3. 解压 Youpk_sailfish.zip 并双击 `flash-all.bat`
 
 
 
