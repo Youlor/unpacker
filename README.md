@@ -112,7 +112,7 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
    static constexpr InterpreterImplKind kInterpreterImplKind = kSwitchImplKind;
    ```
 
-5. 在解释器中插装, 在每条指令执行前设置回调
+5. 在解释器中插桩, 在每条指令执行前设置回调
 
    ```c++
    //interpreter_switch_impl.cc
@@ -179,7 +179,7 @@ FART: https://bbs.pediy.com/thread-252630.htm
 
 1. **该工具仅仅用来学习交流, 请勿用于非法用途, 否则后果自付！**
    
-2. 配置待脱壳的app包名, 准备来讲是进程名称
+2. 配置待脱壳的app包名, 准确来讲是进程名称
 
     ```bash
     adb shell "echo cn.youlor.mydemo >> /data/local/tmp/unpacker.config"
