@@ -1035,6 +1035,24 @@ class Dex2Oat FINAL {
                                                         : OatHeader::kFalseValue);
   }
 
+  //patch by Youlor
+  //++++++++++++++++++++++++++++
+  const char* UNPACK_CONFIG = "/data/local/tmp/unpacker.config";
+  bool ShouldUnpack() {
+    std::ifstream config(UNPACK_CONFIG);
+    std::string line;
+    if(config) {
+        while (std::getline(config, line)) { 
+          std::string package_name = line.substr(0, line.find(':'));
+          if (oat_location_.find(package_name) != std::string::npos) {
+            return true;
+          }
+        }
+    }
+    return false;
+  }
+  //++++++++++++++++++++++++++++
+
   // Parse the arguments from the command line. In case of an unrecognized option or impossible
   // values/combinations, a usage error will be displayed and exit() is called. Thus, if the method
   // returns, arguments have been successfully parsed.
@@ -1182,7 +1200,9 @@ class Dex2Oat FINAL {
 
     //patch by Youlor
     //++++++++++++++++++++++++++++
-    compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
+    if (ShouldUnpack()) {
+      compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
+    }
     //++++++++++++++++++++++++++++
   }
 

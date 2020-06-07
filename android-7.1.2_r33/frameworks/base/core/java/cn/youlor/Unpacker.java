@@ -35,6 +35,10 @@ public class Unpacker {
         if (Unpacker.unpackerThread != null) {
             return;
         }
+
+        if (!shouldUnpack()) {
+            return;
+        }
         
         //开启线程调用
         Unpacker.unpackerThread = new Thread() {
@@ -46,9 +50,7 @@ public class Unpacker {
                     catch (InterruptedException e) {
                         e.printStackTrace();
                     }
-                    if (shouldUnpack()) {
-                        Unpacker.unpackNative();
-                    }   
+                    Unpacker.unpackNative();
                 }
             }
         };
