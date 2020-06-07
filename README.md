@@ -94,6 +94,20 @@ compiler_options_->SetCompilerFilter(CompilerFilter::kVerifyAtRuntime);
 4. 主动调用Class的所有Method, 并修改ArtMethod::Invoke使其强制走switch型解释器
 
    ```c++
+   //unpacker.cc
+   uint32_t args_size = (uint32_t)ArtMethod::NumArgRegisters(method->GetShorty());
+   if (!method->IsStatic()) {
+       args_size += 1;
+   }
+   
+   JValue result;
+   std::vector<uint32_t> args(args_size, 0);
+   if (!method->IsStatic()) {
+       mirror::Object* thiz = klass->AllocObject(self);
+       args[0] = StackReference<mirror::Object>::FromMirrorPtr(thiz).AsVRegValue();  
+   }
+   method->Invoke(self, args.data(), args_size, &result, method->GetShorty());
+   
    //art_method.cc
    if (UNLIKELY(!runtime->IsStarted() || Dbg::IsForcedInterpreterNeededForCalling(self, this) 
    || (Unpacker::isFakeInvoke(self, this) && !this->IsNative()))) {
@@ -206,6 +220,16 @@ FART: https://bbs.pediy.com/thread-252630.htm
     ```bash
     java -jar dexfixer.jar /path/to/unpacker /path/to/output
     ```
+
+
+
+## 适用场景
+
+1. 整体加固
+2. 抽取:
+   - nop占坑型(类似某加密)
+   - naitve化, 在 `<clinit>` 中解密(类似早期阿里)
+   - goto解密型(类似新版某加密, najia): https://bbs.pediy.com/thread-259448.htm
 
 
 
