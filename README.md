@@ -207,16 +207,18 @@ FART: https://bbs.pediy.com/thread-252630.htm
     adb shell "echo cn.youlor.mydemo >> /data/local/tmp/unpacker.config"
     ```
 
-3. 启动apk等待脱壳
+3. 如果apk没有整体加固, 未避免installd调用dex2oat优化, 需要在安装之前执行第2步
+    
+4. 启动apk等待脱壳
     每隔10秒将自动重新脱壳(已完全dump的dex将被忽略), 当日志打印unpack end时脱壳完成
 
-4. pull出dump文件, dump文件路径为 `/data/data/包名/unpacker` 
+5. pull出dump文件, dump文件路径为 `/data/data/包名/unpacker` 
 
     ```bash
     adb pull /data/data/cn.youlor.mydemo/unpacker
     ```
 
-5. 调用修复工具 dexfixer.jar, 两个参数, 第一个为dump文件目录(必须为有效路径), 第二个为重组后的DEX目录(不存在将会创建)
+6. 调用修复工具 dexfixer.jar, 两个参数, 第一个为dump文件目录(必须为有效路径), 第二个为重组后的DEX目录(不存在将会创建)
     ```bash
     java -jar dexfixer.jar /path/to/unpacker /path/to/output
     ```

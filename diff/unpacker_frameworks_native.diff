@@ -1,0 +1,55 @@
+diff --git a/cmds/installd/commands.cpp b/cmds/installd/commands.cpp
+index 271c75ba4..244c1e517 100644
+--- a/cmds/installd/commands.cpp
++++ b/cmds/installd/commands.cpp
+@@ -47,6 +47,11 @@
+ #include <otapreopt_utils.h>
+ #include <utils.h>
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++#include <fstream>
++//++++++++++++++++++++++++++++
++
+ #ifndef LOG_TAG
+ #define LOG_TAG "installd"
+ #endif
+@@ -1616,6 +1621,24 @@ class Dex2oatFileWrapper {
+     bool do_cleanup_;
+ };
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++const char* UNPACK_CONFIG = "/data/local/tmp/unpacker.config";
++bool ShouldUnpack(const char* pkgname) {
++    std::ifstream config(UNPACK_CONFIG);
++    std::string line;
++    if(config) {
++        while (std::getline(config, line)) { 
++            std::string package_name = line.substr(0, line.find(':'));
++            if (package_name == pkgname) {
++                return true;
++            }
++        }
++    }
++    return false;
++}
++//++++++++++++++++++++++++++++
++
+ int dexopt(const char* apk_path, uid_t uid, const char* pkgname, const char* instruction_set,
+            int dexopt_needed, const char* oat_dir, int dexopt_flags, const char* compiler_filter,
+            const char* volume_uuid ATTRIBUTE_UNUSED, const char* shared_libraries)
+@@ -1654,6 +1677,13 @@ int dexopt(const char* apk_path, uid_t uid, const char* pkgname, const char* ins
+         return false;
+     }
+ 
++    //patch by Youlor
++    //++++++++++++++++++++++++++++
++    if (ShouldUnpack(pkgname)) {
++        return false;
++    }
++    //++++++++++++++++++++++++++++
++
+     const char *input_file;
+     char in_odex_path[PKG_PATH_MAX];
+     switch (dexopt_needed) {
