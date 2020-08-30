@@ -124,10 +124,22 @@ index 8aceffbdcc..5c1bffa503 100644
    ART_FRIEND_TEST(mirror::DexCacheTest, Open);  // for AllocDexCache
    DISALLOW_COPY_AND_ASSIGN(ClassLinker);
 diff --git a/runtime/interpreter/interpreter.cc b/runtime/interpreter/interpreter.cc
-index 8c42b3abce..690722e99a 100644
+index 8c42b3abce..07f57fa656 100644
 --- a/runtime/interpreter/interpreter.cc
 +++ b/runtime/interpreter/interpreter.cc
-@@ -240,7 +240,11 @@ static std::ostream& operator<<(std::ostream& os, const InterpreterImplKind& rhs
+@@ -29,6 +29,11 @@
+ #include "jit/jit.h"
+ #include "jit/jit_code_cache.h"
+ 
++//patch by Youlor
++//++++++++++++++++++++++++++++
++#include "unpacker/unpacker.h"
++//++++++++++++++++++++++++++++
++
+ namespace art {
+ namespace interpreter {
+ 
+@@ -240,7 +245,11 @@ static std::ostream& operator<<(std::ostream& os, const InterpreterImplKind& rhs
    return os;
  }
  
@@ -135,11 +147,27 @@ index 8c42b3abce..690722e99a 100644
 +//patch by Youlor
 +//++++++++++++++++++++++++++++
 +//static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
-+static constexpr InterpreterImplKind kInterpreterImplKind = kSwitchImplKind;
++static InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
 +//++++++++++++++++++++++++++++
  
  #if defined(__clang__)
  // Clang 3.4 fails to build the goto interpreter implementation.
+@@ -272,6 +281,15 @@ static inline JValue Execute(
+     bool stay_in_interpreter = false) SHARED_REQUIRES(Locks::mutator_lock_) {
+   DCHECK(!shadow_frame.GetMethod()->IsAbstract());
+   DCHECK(!shadow_frame.GetMethod()->IsNative());
++
++  //patch by Youlor
++  //++++++++++++++++++++++++++++
++  if (Unpacker::isFakeInvoke(self, shadow_frame.GetMethod())) {
++    //如果是主动调用fake invoke则强制走switch型解释器
++    kInterpreterImplKind = kSwitchImplKind;
++  }
++  //++++++++++++++++++++++++++++
++
+   if (LIKELY(shadow_frame.GetDexPC() == 0)) {  // Entering the method, but not via deoptimization.
+     if (kIsDebugBuild) {
+       self->AssertNoPendingException();
 diff --git a/runtime/interpreter/interpreter_switch_impl.cc b/runtime/interpreter/interpreter_switch_impl.cc
 index 18330babe0..b642ca9416 100644
 --- a/runtime/interpreter/interpreter_switch_impl.cc

@@ -29,6 +29,11 @@
 #include "jit/jit.h"
 #include "jit/jit_code_cache.h"
 
+//patch by Youlor
+//++++++++++++++++++++++++++++
+#include "unpacker/unpacker.h"
+//++++++++++++++++++++++++++++
+
 namespace art {
 namespace interpreter {
 
@@ -243,7 +248,7 @@ static std::ostream& operator<<(std::ostream& os, const InterpreterImplKind& rhs
 //patch by Youlor
 //++++++++++++++++++++++++++++
 //static constexpr InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
-static constexpr InterpreterImplKind kInterpreterImplKind = kSwitchImplKind;
+static InterpreterImplKind kInterpreterImplKind = kMterpImplKind;
 //++++++++++++++++++++++++++++
 
 #if defined(__clang__)
@@ -276,6 +281,15 @@ static inline JValue Execute(
     bool stay_in_interpreter = false) SHARED_REQUIRES(Locks::mutator_lock_) {
   DCHECK(!shadow_frame.GetMethod()->IsAbstract());
   DCHECK(!shadow_frame.GetMethod()->IsNative());
+
+  //patch by Youlor
+  //++++++++++++++++++++++++++++
+  if (Unpacker::isFakeInvoke(self, shadow_frame.GetMethod())) {
+    //如果是主动调用fake invoke则强制走switch型解释器
+    kInterpreterImplKind = kSwitchImplKind;
+  }
+  //++++++++++++++++++++++++++++
+
   if (LIKELY(shadow_frame.GetDexPC() == 0)) {  // Entering the method, but not via deoptimization.
     if (kIsDebugBuild) {
       self->AssertNoPendingException();
